@@ -17,27 +17,6 @@ keywords = ["graphics"]
 categories = ["graphics", "rendering"]
 license = "MIT OR Apache-2.0"
 
-[workspace]
-members = ["."]
-default-members = ["."]
-resolver = "2"
-
-[workspace.dependencies.wgc]
-package = "wgpu-core"
-version = "27.0.3"
-
-[workspace.dependencies.wgt]
-package = "wgpu-types"
-version = "27.0.1"
-
-[workspace.dependencies.hal]
-package = "wgpu-hal"
-version = "27.0.4"
-
-[workspace.dependencies.naga]
-package = "naga"
-version = "27.0.3"
-
 [lib]
 crate-type = ["cdylib", "staticlib"]
 
@@ -100,23 +79,25 @@ serde = ["dep:serde", "wgc/serde"]
 replay = ["serde", "wgc/replay"]
 
 [dependencies.wgc]
-workspace = true
-features = ["raw-window-handle"]
+package = "wgpu-core"
+path = "wgpu/wgpu-core"
 
 [dependencies.hal]
-workspace = true
+package = "wgpu-hal"
+path = "wgpu/wgpu-hal"
 
 [target.'cfg(all(unix, not(target_os = "ios"), not(target_os = "macos")))'.dependencies]
-hal = { workspace = true, features = ["renderdoc"] }
+hal = { package = "wgpu-hal", path = "wgpu/wgpu-hal", features = ["renderdoc"] }
 
 [target.'cfg(windows)'.dependencies]
-hal = { workspace = true, features = ["dx12", "renderdoc"] }
+hal = { package = "wgpu-hal", path = "wgpu/wgpu-hal", features = ["dx12", "renderdoc"] }
 
 [dependencies.wgt]
-workspace = true
+package = "wgpu-types"
+path = "wgpu/wgpu-types"
 
 [dependencies.naga]
-workspace = true
+path = "wgpu/naga"
 optional = true
 
 [dependencies.serde]

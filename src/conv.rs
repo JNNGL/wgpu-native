@@ -33,7 +33,7 @@ map_enum_with_undefined!(
 map_enum_with_undefined!(
     map_mipmap_filter_mode,
     WGPUMipmapFilterMode,
-    wgt::FilterMode,
+    wgt::MipmapFilterMode,
     "Unknown mipmap filter mode",
     Nearest,
     Linear
@@ -325,7 +325,6 @@ pub unsafe fn map_instance_descriptor(
             native::WGPUDx12Compiler_Dxc => match string_view_into_str(extras.dxcPath) {
                 Some(dxc_path) => wgt::Dx12Compiler::DynamicDxc {
                     dxc_path: dxc_path.to_string(),
-                    max_shader_model: map_dxc_max_shader_model(extras.dxcMaxShaderModel),
                 },
                 _ => wgt::Dx12Compiler::StaticDxc,
             },
@@ -347,6 +346,7 @@ pub unsafe fn map_instance_descriptor(
                 gl: wgt::GlBackendOptions {
                     gles_minor_version: map_gles3_minor_version(extras.gles3MinorVersion),
                     fence_behavior: map_gl_fence_behavior(extras.glFenceBehaviour),
+                    debug_fns: Default::default(),
                 },
                 dx12: wgt::Dx12BackendOptions {
                     shader_compiler: dx12_shader_compiler,
@@ -363,9 +363,10 @@ pub unsafe fn map_instance_descriptor(
                 for_device_loss,
                 for_resource_creation,
             },
+            display: None,
         }
     } else {
-        wgt::InstanceDescriptor::default()
+        wgt::InstanceDescriptor::new_without_display_handle()
     }
 }
 
@@ -416,29 +417,26 @@ pub unsafe fn map_pipeline_layout_descriptor<'a>(
 ) -> wgc::binding_model::PipelineLayoutDescriptor<'a> {
     let bind_group_layouts = make_slice(des.bindGroupLayouts, des.bindGroupLayoutCount)
         .iter()
-        .map(|layout| {
-            layout
-                .as_ref()
-                .expect("invalid bind group layout for pipeline layout descriptor")
-                .id
-        })
+        .map(|layout| layout.as_ref().map(|layout| layout.id))
         .collect::<Vec<_>>();
 
-    let push_constant_ranges = extras.map_or(Vec::new(), |extras| {
+    let immediate_size = extras.map_or(0, |extras| {
         make_slice(extras.pushConstantRanges, extras.pushConstantRangeCount)
             .iter()
-            .map(|range| wgt::PushConstantRange {
-                stages: from_u64_bits(range.stages)
-                    .expect("invalid shader stage for push constant range"),
-                range: range.start..range.end,
+            .map(|range| {
+                if range.start > range.end {
+                    panic!("invalid push constant range for pipeline layout descriptor");
+                }
+                range.end
             })
-            .collect()
+            .max()
+            .unwrap_or(0)
     });
 
     wgc::binding_model::PipelineLayoutDescriptor {
         label: string_view_into_label(des.label),
         bind_group_layouts: Cow::from(bind_group_layouts),
-        push_constant_ranges: Cow::from(push_constant_ranges),
+        immediate_size,
     }
 }
 
@@ -490,7 +488,7 @@ pub fn write_limits_struct(wgt_limits: wgt::Limits, limits: &mut native::WGPULim
                 *mut native::WGPUChainedStructOut,
                 *mut native::WGPUNativeLimits,
             >(limits.nextInChain);
-            (*native_limits).maxPushConstantSize = wgt_limits.max_push_constant_size;
+            (*native_limits).maxPushConstantSize = wgt_limits.max_immediate_size;
             (*native_limits).maxNonSamplerBindings = wgt_limits.max_non_sampler_bindings;
             (*native_limits).maxBindingArrayElementsPerShaderStage =
                 wgt_limits.max_binding_array_elements_per_shader_stage;
@@ -551,10 +549,10 @@ pub fn map_required_limits(
         wgt_limits.max_uniform_buffers_per_shader_stage = limits.maxUniformBuffersPerShaderStage;
     }
     if limits.maxUniformBufferBindingSize != WGPU_LIMIT_U64_UNDEFINED {
-        wgt_limits.max_uniform_buffer_binding_size = limits.maxUniformBufferBindingSize as u32;
+        wgt_limits.max_uniform_buffer_binding_size = limits.maxUniformBufferBindingSize;
     }
     if limits.maxStorageBufferBindingSize != WGPU_LIMIT_U64_UNDEFINED {
-        wgt_limits.max_storage_buffer_binding_size = limits.maxStorageBufferBindingSize as u32;
+        wgt_limits.max_storage_buffer_binding_size = limits.maxStorageBufferBindingSize;
     }
     if limits.minUniformBufferOffsetAlignment != native::WGPU_LIMIT_U32_UNDEFINED {
         wgt_limits.min_uniform_buffer_offset_alignment = limits.minUniformBufferOffsetAlignment;
@@ -604,7 +602,7 @@ pub fn map_required_limits(
     }
     if let Some(limits) = extras {
         if limits.maxPushConstantSize != native::WGPU_LIMIT_U32_UNDEFINED {
-            wgt_limits.max_push_constant_size = limits.maxPushConstantSize;
+            wgt_limits.max_immediate_size = limits.maxPushConstantSize;
         }
         if limits.maxNonSamplerBindings != native::WGPU_LIMIT_U32_UNDEFINED {
             wgt_limits.max_non_sampler_bindings = limits.maxNonSamplerBindings;
@@ -1142,7 +1140,7 @@ pub fn features_to_native(features: wgt::Features) -> Vec<native::WGPUFeatureNam
         temp.push(native::WGPUFeatureName_DualSourceBlending);
     }
     // wgpu-rs only features
-    if features.contains(wgt::Features::PUSH_CONSTANTS) {
+    if features.contains(wgt::Features::IMMEDIATES) {
         temp.push(native::WGPUNativeFeature_PushConstants);
     }
     if features.contains(wgt::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
@@ -1235,7 +1233,7 @@ pub fn features_to_native(features: wgt::Features) -> Vec<native::WGPUFeatureNam
     if features.contains(wgt::Features::SHADER_I16) {
         temp.push(native::WGPUNativeFeature_ShaderI16);
     }
-    if features.contains(wgt::Features::SHADER_PRIMITIVE_INDEX) {
+    if features.contains(wgt::Features::PRIMITIVE_INDEX) {
         temp.push(native::WGPUNativeFeature_ShaderPrimitiveIndex);
     }
     if features.contains(wgt::Features::SHADER_EARLY_DEPTH_TEST) {
@@ -1278,7 +1276,7 @@ pub fn map_feature(feature: native::WGPUFeatureName) -> Option<wgt::Features> {
         native::WGPUFeatureName_DualSourceBlending => Some(Features::DUAL_SOURCE_BLENDING),
 
         // wgpu-rs only features
-        native::WGPUNativeFeature_PushConstants => Some(Features::PUSH_CONSTANTS),
+        native::WGPUNativeFeature_PushConstants => Some(Features::IMMEDIATES),
         native::WGPUNativeFeature_TextureAdapterSpecificFormatFeatures => Some(Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
         native::WGPUNativeFeature_MultiDrawIndirectCount => Some(Features::MULTI_DRAW_INDIRECT_COUNT),
         native::WGPUNativeFeature_VertexWritableStorage => Some(Features::VERTEX_WRITABLE_STORAGE),
@@ -1308,7 +1306,7 @@ pub fn map_feature(feature: native::WGPUFeatureName) -> Option<wgt::Features> {
         native::WGPUNativeFeature_RayQuery => Some(Features::EXPERIMENTAL_RAY_QUERY),
         native::WGPUNativeFeature_ShaderF64 => Some(Features::SHADER_F64),
         native::WGPUNativeFeature_ShaderInt64 => Some(Features::SHADER_INT64),
-        native::WGPUNativeFeature_ShaderPrimitiveIndex => Some(Features::SHADER_PRIMITIVE_INDEX),
+        native::WGPUNativeFeature_ShaderPrimitiveIndex => Some(Features::PRIMITIVE_INDEX),
         native::WGPUNativeFeature_ShaderEarlyDepthTest => Some(Features::SHADER_EARLY_DEPTH_TEST),
         native::WGPUNativeFeature_Subgroup => Some(Features::SUBGROUP),
         native::WGPUNativeFeature_SubgroupVertex => Some(Features::SUBGROUP_VERTEX),
@@ -1357,7 +1355,7 @@ pub fn map_bind_group_entry<'a>(
                     size: match entry.size {
                         0 => panic!("invalid size"),
                         WGPU_WHOLE_SIZE => None,
-                        _ => Some(unsafe { NonZeroU64::new_unchecked(entry.size) }),
+                        _ => Some(entry.size),
                     },
                 },
             ),
@@ -1407,7 +1405,11 @@ pub fn map_bind_group_entry<'a>(
                         .expect("invalid buffers for bind group entry extras")
                         .id,
                     offset: entry.offset,
-                    size: std::num::NonZeroU64::new(entry.size),
+                    size: match entry.size {
+                        0 => panic!("invalid size"),
+                        WGPU_WHOLE_SIZE => None,
+                        _ => Some(entry.size),
+                    },
                 })
                 .collect();
             return wgc::binding_model::BindGroupEntry {
