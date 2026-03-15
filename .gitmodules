@@ -1,6 +1,9 @@
-[submodule "ffi/webgpu-headers"]
-	path = ffi/webgpu-headers
-	url = https://github.com/webgpu-native/webgpu-headers
 [submodule "wgpu"]
 	path = wgpu
 	url = https://github.com/gfx-rs/wgpu
+[submodule "webgpu-cpp"]
+	path = webgpu-cpp
+	url = https://github.com/eliemichel/WebGPU-Cpp
+[submodule "ffi/webgpu"]
+	path = ffi/webgpu
+	url = https://github.com/webgpu-native/webgpu-headers/

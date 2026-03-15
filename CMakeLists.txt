@@ -17,7 +17,6 @@ add_custom_target(wgpu_native_lib
 add_library(wgpu_native INTERFACE)
 
 target_include_directories(wgpu_native INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}/ffi/webgpu-headers
         ${CMAKE_CURRENT_SOURCE_DIR}/ffi)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR ${CMAKE_SYSTEM_NAME} MATCHES "Linux")
@@ -32,3 +31,14 @@ if (APPLE)
             "-framework MetalKit -framework CoreFoundation"
             "-framework Foundation")
 endif()
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+execute_process(COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/webgpu-cpp/generate.py --use-init-macros
+        -u ${CMAKE_CURRENT_SOURCE_DIR}/ffi/webgpu/webgpu.h -o ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/webgpu.hpp
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/webgpu-cpp
+        COMMAND_ERROR_IS_FATAL ANY)
+
+add_library(wgpu_cpp STATIC ${CMAKE_CURRENT_SOURCE_DIR}/cpp/webgpu.cpp)
+target_include_directories(wgpu_cpp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include)
+target_link_libraries(wgpu_cpp PUBLIC wgpu_native)
